@@ -31,7 +31,7 @@ A modern, dark-themed deal-flow and company intelligence platform for venture ca
 - Meta strip: location, employees, founded, funding, stage, domain
 - **Signals tab** — coloured left-border cards per signal type with clock timestamps
 - **Notes tab** — compose area with `⌘+Enter` shortcut, hover-to-reveal delete
-- **Enrichment tab** — one-click mock enrichment generating summary, bullet points, keywords, derived signals, and scraped sources
+- **Enrichment tab** — one-click Clearbit enrichment: summary, bullet points, tech stack, social profiles, keywords, and derived signals
 
 ### Lists
 - Create named collections with optional descriptions
@@ -129,7 +129,7 @@ src/
 
 ## Roadmap
 
-- [ ] Real API enrichment (Clearbit, PitchBook, Crunchbase)
+- [x] Real API enrichment (Clearbit + Hunter.io)
 - [ ] Authentication and multi-user support
 - [ ] CRM integrations (HubSpot, Salesforce)
 - [ ] Email digest of new signals
