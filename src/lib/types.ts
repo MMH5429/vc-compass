@@ -50,6 +50,16 @@ export interface EnrichmentResult {
   signals: DerivedSignal[];
   sources: EnrichmentSource[];
   enrichedAt: string;
+  // Extended fields populated by real API enrichment
+  logoUrl?: string;
+  techStack?: string[];
+  employeeCount?: number;
+  socialProfiles?: {
+    linkedin?: string;
+    twitter?: string;
+    crunchbase?: string;
+  };
+  dataSource?: 'clearbit' | 'mock';
 }
 
 export interface DerivedSignal {

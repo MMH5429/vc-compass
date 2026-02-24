@@ -4,6 +4,7 @@ import {
   ArrowLeft, Globe, MapPin, Users, Calendar, DollarSign, Zap,
   Plus, Trash2, Send, RefreshCw, Loader2, ExternalLink,
   FileText, Sparkles, CheckCircle2, Clock, Tag,
+  AlertCircle, Key, Code2, Link2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -19,6 +20,7 @@ import {
 import { mockCompanies } from '@/data/mockCompanies';
 import { useLocalStorage } from '@/hooks/useLocalStorage';
 import type { CompanyList, Note, EnrichmentResult } from '@/lib/types';
+import { enrichCompany, EnrichmentApiError } from '@/lib/enrichmentApi';
 import { toast } from 'sonner';
 
 const signalTypeColor: Record<string, string> = {
@@ -74,6 +76,8 @@ export default function CompanyProfile() {
   );
   const [newNote, setNewNote] = useState('');
   const [enriching, setEnriching] = useState(false);
+  const [enrichError, setEnrichError] = useState<string | null>(null);
+  const [enrichErrorCode, setEnrichErrorCode] = useState<string | null>(null);
   const [selectedList, setSelectedList] = useState('');
 
   if (!company) {
@@ -130,36 +134,30 @@ export default function CompanyProfile() {
 
   const handleEnrich = async () => {
     setEnriching(true);
-    await new Promise((r) => setTimeout(r, 2500));
-    const result: EnrichmentResult = {
-      companyId: company.id,
-      summary: `${company.name} is a ${company.stage.toLowerCase()}-stage company focused on ${company.description.toLowerCase().replace(/\.$/, '')}. Based in ${company.location}, the company has raised ${company.funding} and employs ${company.employees} people.`,
-      whatTheyDo: [
-        `Develops ${company.industry.toLowerCase()} solutions for enterprise and research applications`,
-        `Founded in ${company.founded} with headquarters in ${company.location}`,
-        `Team of ${company.employees} employees across engineering, product, and operations`,
-        `Has raised ${company.funding} in venture funding to date`,
-        `Core technology areas include ${company.tags.slice(0, 3).join(', ')}`,
-        `Competing in the rapidly growing ${company.industry.toLowerCase()} market segment`,
-      ],
-      keywords: [...company.tags, ...company.industry.split(' / '), 'startup', company.stage.toLowerCase(), 'venture-backed'],
-      signals: [
-        { signal: 'Active careers page detected — hiring signal', confidence: 'high' },
-        { signal: 'Recent blog/changelog activity within 30 days', confidence: 'medium' },
-        { signal: 'Technical documentation publicly available', confidence: 'high' },
-        { signal: 'Social media activity increasing week-over-week', confidence: 'medium' },
-      ],
-      sources: [
-        { url: `https://${company.domain}`, scrapedAt: new Date().toISOString() },
-        { url: `https://${company.domain}/about`, scrapedAt: new Date().toISOString() },
-        { url: `https://${company.domain}/careers`, scrapedAt: new Date().toISOString() },
-        { url: `https://${company.domain}/blog`, scrapedAt: new Date().toISOString() },
-      ],
-      enrichedAt: new Date().toISOString(),
-    };
-    setEnrichmentCache((prev) => ({ ...prev, [company.id]: result }));
-    setEnriching(false);
-    toast.success('Enrichment complete');
+    setEnrichError(null);
+    setEnrichErrorCode(null);
+    try {
+      const result = await enrichCompany(company.domain, company.id);
+      setEnrichmentCache((prev) => ({ ...prev, [company.id]: result }));
+      toast.success('Enrichment complete');
+    } catch (err) {
+      if (err instanceof EnrichmentApiError) {
+        setEnrichErrorCode(err.code);
+        const messages: Record<string, string> = {
+          NO_API_KEY: 'No Clearbit API key configured. See setup instructions below.',
+          INVALID_API_KEY: 'API key is invalid or expired. Check your VITE_CLEARBIT_API_KEY.',
+          NOT_FOUND: `No Clearbit data found for ${company.domain}. This domain may not be indexed.`,
+          RATE_LIMITED: 'Rate limit reached. Please wait and try again.',
+          API_ERROR: 'Clearbit returned an unexpected error. Please try again.',
+        };
+        setEnrichError(messages[err.code] ?? err.message);
+      } else {
+        setEnrichError('Unexpected error. Please try again.');
+      }
+      toast.error('Enrichment failed');
+    } finally {
+      setEnriching(false);
+    }
   };
 
   return (
@@ -386,35 +384,113 @@ export default function CompanyProfile() {
           {/* ── Enrichment ── */}
           <TabsContent value="enrichment" className="mt-5">
             {!enrichment ? (
-              <div className="text-center py-20 bg-card border border-border rounded-xl">
-                <div className="h-14 w-14 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-5">
-                  <Sparkles className="h-7 w-7 text-primary" />
-                </div>
-                <h3 className="font-display font-bold text-xl mb-2">Enrich this company</h3>
-                <p className="text-sm text-muted-foreground mb-8 max-w-sm mx-auto leading-relaxed">
-                  Fetch and analyze public data from{' '}
-                  <span className="font-mono text-foreground">{company.domain}</span> to extract
-                  key signals, keywords, and company intelligence.
-                </p>
-                <Button onClick={handleEnrich} disabled={enriching} size="lg" className="min-w-[160px]">
-                  {enriching ? (
-                    <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Enriching…</>
-                  ) : (
-                    <><Sparkles className="h-4 w-4 mr-2" />Enrich Company</>
-                  )}
-                </Button>
-              </div>
+              <>
+                {/* NO_API_KEY: Setup card */}
+                {enrichErrorCode === 'NO_API_KEY' ? (
+                  <div className="bg-card border border-border rounded-xl p-6 space-y-5">
+                    <div className="flex items-center gap-3">
+                      <div className="h-10 w-10 rounded-xl bg-amber-500/10 flex items-center justify-center shrink-0">
+                        <Key className="h-5 w-5 text-amber-400" />
+                      </div>
+                      <div>
+                        <h3 className="font-display font-bold text-base">API Key Required</h3>
+                        <p className="text-sm text-muted-foreground">Configure Clearbit to enable real enrichment</p>
+                      </div>
+                    </div>
+                    <div className="bg-muted/60 rounded-lg p-4 font-mono text-xs space-y-1.5 border border-border">
+                      <p className="text-muted-foreground"># .env.local</p>
+                      <p>
+                        <span className="text-primary">VITE_CLEARBIT_API_KEY</span>
+                        =<span className="text-emerald-400">sk-your-key-here</span>
+                      </p>
+                      <p>
+                        <span className="text-primary">VITE_HUNTER_API_KEY</span>
+                        =<span className="text-emerald-400">your-hunter-key-here</span>
+                      </p>
+                    </div>
+                    <p className="text-sm text-muted-foreground leading-relaxed">
+                      Get a free Clearbit API key from the Clearbit developer dashboard.
+                      The free tier supports up to 50 enrichments/month. Hunter.io is optional
+                      — it adds email signal data on top of Clearbit.
+                    </p>
+                    <Button variant="outline" size="sm" onClick={handleEnrich} disabled={enriching}>
+                      {enriching
+                        ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />Trying…</>
+                        : 'Try Again'}
+                    </Button>
+                  </div>
+                ) : enrichError ? (
+                  /* Other API errors */
+                  <div className="bg-card border border-border rounded-xl p-8 flex flex-col items-center text-center gap-4">
+                    <div className={`h-12 w-12 rounded-xl flex items-center justify-center ${
+                      enrichErrorCode === 'NOT_FOUND' ? 'bg-amber-500/10' : 'bg-destructive/10'
+                    }`}>
+                      <AlertCircle className={`h-6 w-6 ${
+                        enrichErrorCode === 'NOT_FOUND' ? 'text-amber-400' : 'text-destructive'
+                      }`} />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold mb-1.5">
+                        {enrichErrorCode === 'NOT_FOUND' ? 'Domain Not Found'
+                          : enrichErrorCode === 'RATE_LIMITED' ? 'Rate Limit Reached'
+                          : enrichErrorCode === 'INVALID_API_KEY' ? 'Invalid API Key'
+                          : 'Enrichment Failed'}
+                      </h3>
+                      <p className="text-sm text-muted-foreground max-w-sm">{enrichError}</p>
+                    </div>
+                    <Button variant="outline" size="sm" onClick={handleEnrich} disabled={enriching}>
+                      {enriching
+                        ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />Retrying…</>
+                        : 'Try Again'}
+                    </Button>
+                  </div>
+                ) : (
+                  /* Default CTA */
+                  <div className="text-center py-20 bg-card border border-border rounded-xl">
+                    <div className="h-14 w-14 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-5">
+                      <Sparkles className="h-7 w-7 text-primary" />
+                    </div>
+                    <h3 className="font-display font-bold text-xl mb-2">Enrich this company</h3>
+                    <p className="text-sm text-muted-foreground mb-8 max-w-sm mx-auto leading-relaxed">
+                      Pull live data from Clearbit for{' '}
+                      <span className="font-mono text-foreground">{company.domain}</span>{' '}
+                      — tech stack, funding history, social profiles, and derived signals.
+                    </p>
+                    <Button onClick={handleEnrich} disabled={enriching} size="lg" className="min-w-[160px]">
+                      {enriching ? (
+                        <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Enriching…</>
+                      ) : (
+                        <><Sparkles className="h-4 w-4 mr-2" />Enrich Company</>
+                      )}
+                    </Button>
+                  </div>
+                )}
+              </>
             ) : (
               <div className="space-y-4">
                 {/* Toolbar */}
                 <div className="flex items-center justify-between py-1">
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
-                    <span className="font-mono">
-                      Enriched {new Date(enrichment.enrichedAt).toLocaleString('en-US', {
-                        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-                      })}
-                    </span>
+                  <div className="flex items-center gap-3">
+                    {enrichment.logoUrl && (
+                      <img
+                        src={enrichment.logoUrl}
+                        alt={`${company.name} logo`}
+                        className="h-6 w-6 rounded object-contain bg-white/5 border border-border p-0.5"
+                      />
+                    )}
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                      <span className="font-mono">
+                        Enriched {new Date(enrichment.enrichedAt).toLocaleString('en-US', {
+                          month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+                        })}
+                      </span>
+                      {enrichment.dataSource && (
+                        <span className="px-1.5 py-0.5 rounded bg-muted border border-border text-[10px] uppercase tracking-widest font-semibold">
+                          {enrichment.dataSource}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <Button variant="outline" size="sm" onClick={handleEnrich} disabled={enriching}>
                     {enriching
@@ -440,14 +516,85 @@ export default function CompanyProfile() {
                   <ul className="space-y-2">
                     {enrichment.whatTheyDo.map((item, i) => (
                       <li key={i} className="text-sm flex items-start gap-2.5">
-                        <span className="text-primary mt-1 shrink-0">
-                          <div className="w-1.5 h-1.5 rounded-full bg-primary mt-0.5" />
-                        </span>
+                        <div className="w-1.5 h-1.5 rounded-full bg-primary mt-[5px] shrink-0" />
                         <span className="text-secondary-foreground leading-relaxed">{item}</span>
                       </li>
                     ))}
                   </ul>
                 </section>
+
+                {/* Tech Stack — only shown when Clearbit returns it */}
+                {enrichment.techStack && enrichment.techStack.length > 0 && (
+                  <section className="bg-card border border-border rounded-xl p-5">
+                    <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest mb-3 flex items-center gap-2">
+                      <Code2 className="h-3.5 w-3.5" /> Tech Stack
+                      <span className="ml-auto font-mono text-[10px] normal-case tracking-normal text-muted-foreground">
+                        {enrichment.techStack.length} technologies
+                      </span>
+                    </h3>
+                    <div className="flex flex-wrap gap-1.5">
+                      {enrichment.techStack.map((tech, i) => (
+                        <Badge key={i} variant="secondary" className="text-xs font-mono">
+                          {tech}
+                        </Badge>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {/* Social Profiles — only shown when Clearbit returns them */}
+                {enrichment.socialProfiles &&
+                  (enrichment.socialProfiles.linkedin || enrichment.socialProfiles.twitter || enrichment.socialProfiles.crunchbase) && (
+                  <section className="bg-card border border-border rounded-xl p-5">
+                    <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest mb-3 flex items-center gap-2">
+                      <Link2 className="h-3.5 w-3.5" /> Social Profiles
+                    </h3>
+                    <div className="space-y-2.5">
+                      {enrichment.socialProfiles.linkedin && (
+                        <a
+                          href={enrichment.socialProfiles.linkedin}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2 text-sm text-primary hover:underline"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                          LinkedIn
+                          <span className="text-muted-foreground font-mono text-xs truncate">
+                            {enrichment.socialProfiles.linkedin}
+                          </span>
+                        </a>
+                      )}
+                      {enrichment.socialProfiles.twitter && (
+                        <a
+                          href={enrichment.socialProfiles.twitter}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2 text-sm text-primary hover:underline"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                          Twitter / X
+                          <span className="text-muted-foreground font-mono text-xs truncate">
+                            {enrichment.socialProfiles.twitter}
+                          </span>
+                        </a>
+                      )}
+                      {enrichment.socialProfiles.crunchbase && (
+                        <a
+                          href={enrichment.socialProfiles.crunchbase}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2 text-sm text-primary hover:underline"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                          Crunchbase
+                          <span className="text-muted-foreground font-mono text-xs truncate">
+                            {enrichment.socialProfiles.crunchbase}
+                          </span>
+                        </a>
+                      )}
+                    </div>
+                  </section>
+                )}
 
                 {/* Keywords */}
                 <section className="bg-card border border-border rounded-xl p-5">
